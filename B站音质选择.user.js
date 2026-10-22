@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.2.1
+// @version      1.2.2
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -367,7 +367,11 @@
     var id = runningId() || applied() || selected();
     var stream = streams().filter(function (x) { return x.id === id; })[0];
     var label = btn.querySelector('.bpx-player-ctrl-quality-result-name');
-    if (label) label.textContent = name(id);
+    // 只有档位文字真的变了才重新对齐间距；否则 hover、弹幕这些 DOM 变化会反复触发测量
+    if (label && label.textContent !== name(id)) {
+      label.textContent = name(id);
+      fitSpacing(btn);
+    }
     btn.title = '音质：' + name(id, true) + (stream ? ' ' + stream.kbps + ' kbps' : '');
   }
 
@@ -440,7 +444,7 @@
     if (!bar) return;
 
     var btn = bar.querySelector('.aq-ctrl');
-    if (btn) { place(btn, bar); fitSpacing(btn); paint(btn); return; }
+    if (btn) { place(btn, bar); paint(btn); return; }
 
     btn = document.createElement('div');
     btn.className = 'bpx-player-ctrl-btn bpx-player-ctrl-aq aq-ctrl';
@@ -463,9 +467,12 @@
 
     bar.appendChild(btn);
     place(btn, bar);
-    fitSpacing(btn);
+    paint(btn); // 文字就位时内部会调一次 fitSpacing
 
-    paint(btn);
+    // 字体可能晚一步加载导致宽度变化，错开一拍再校一次就稳定，之后不再重算
+    setTimeout(function () { fitSpacing(btn); }, 800);
+
+    return;
   }
 
   // -------------------------------------------------------- 换档保留进度
