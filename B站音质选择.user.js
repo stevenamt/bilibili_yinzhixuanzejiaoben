@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.2.0
+// @version      1.2.1
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -414,12 +414,13 @@
     var prevPad = pb.right - pt.right;      // 前一个按钮右侧留白
     var nextPad = nt.left - nb.left;        // 后一个按钮左侧留白
 
-    // 原生若相邻时的视觉间距 = 前一个的右留白 + 原生 margin + 后一个的左留白
-    var nativeGap = parseFloat(getComputedStyle(prev).marginRight) || 10;
-    var gap = prevPad + nativeGap + nextPad;
+    // 原生若相邻时的视觉间距 = 前一个的右留白 + 前一个的 margin + 后一个的 margin + 后一个的左留白
+    var prevMr = parseFloat(getComputedStyle(prev).marginRight) || 0;
+    var nextMl = parseFloat(getComputedStyle(next).marginLeft) || 0;
+    var gap = prevPad + prevMr + nextPad + nextMl;
 
-    var ml = Math.max(0, gap - padLeft - prevPad) + 'px';
-    var mr = Math.max(0, gap - padRight - nextPad) + 'px';
+    var ml = Math.max(0, gap - padLeft - prevPad - prevMr) + 'px';
+    var mr = Math.max(0, gap - padRight - nextPad - nextMl) + 'px';
     if (btn.style.marginLeft !== ml) btn.style.marginLeft = ml;
     if (btn.style.marginRight !== mr) btn.style.marginRight = mr;
   }
