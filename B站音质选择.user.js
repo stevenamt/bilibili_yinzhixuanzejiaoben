@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.2.2
+// @version      1.3.0
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -375,58 +375,16 @@
     btn.title = '音质：' + name(id, true) + (stream ? ' ' + stream.kbps + ' kbps' : '');
   }
 
-  // 取元素内文字的实际边界（盒子宽不等于文字宽，原生按钮内部有留白）
-  function textRect(el) {
-    if (!el) return null;
-    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    var node, best = null;
-    while ((node = walker.nextNode())) {
-      if (!node.textContent.trim()) continue;
-      var r = document.createRange();
-      r.selectNodeContents(node);
-      var b = r.getBoundingClientRect();
-      if (!best || b.width > best.width) best = b;
-    }
-    return best;
-  }
-
-  // 兜底：拿不到相邻按钮时，直接沿用原生按钮的 margin
-  function fitNative(btn) {
-    var ref = document.querySelector('.bpx-player-control-bottom-right .bpx-player-ctrl-btn:not(.aq-ctrl)');
-    if (!ref) return;
-    var cs = getComputedStyle(ref);
-    if (btn.style.marginRight === cs.marginRight) return;
-    btn.style.marginLeft = cs.marginLeft;
-    btn.style.marginRight = cs.marginRight;
-  }
-
-  // 让「192K」左右两侧的文字间距相等，而不是盒子间距相等：
-  // 原生按钮内部留白不同（倍速左侧有下拉三角，占 11px），只对齐 margin 会让一侧挤、一侧空。
-  // 做法是先算出「这两个原生按钮如果相邻时的视觉间距」，再反推自己该留多少 margin。
+  // 间距直接交给原生按钮自己的 margin/padding：清晰度右边距 10px、倍速左侧留白 11px，
+  // 自己留 0 时视觉上左右各约 11px，本来就是对等的。
+  //
+  // 之前用 Range 量文字边界反推 margin，问题是清晰度 hover 时会插提示层、加 padding，
+  // 测出来的边界跟着变，margin 从 8.7 跳到 23.2，整条控制栏被撑宽后左移——就是那个"跳一下"。
   function fitSpacing(btn) {
-    var prev = btn.previousElementSibling;
-    var next = btn.nextElementSibling;
-    var pt = textRect(prev), nt = textRect(next), bt = textRect(btn);
-    if (!pt || !nt || !bt) { fitNative(btn); return; }
-
-    var pb = prev.getBoundingClientRect();
-    var nb = next.getBoundingClientRect();
-    var bb = btn.getBoundingClientRect();
-
-    var padLeft = bt.left - bb.left;        // 文字左边到盒子左边
-    var padRight = bb.right - bt.right;     // 文字右边到盒子右边
-    var prevPad = pb.right - pt.right;      // 前一个按钮右侧留白
-    var nextPad = nt.left - nb.left;        // 后一个按钮左侧留白
-
-    // 原生若相邻时的视觉间距 = 前一个的右留白 + 前一个的 margin + 后一个的 margin + 后一个的左留白
-    var prevMr = parseFloat(getComputedStyle(prev).marginRight) || 0;
-    var nextMl = parseFloat(getComputedStyle(next).marginLeft) || 0;
-    var gap = prevPad + prevMr + nextPad + nextMl;
-
-    var ml = Math.max(0, gap - padLeft - prevPad - prevMr) + 'px';
-    var mr = Math.max(0, gap - padRight - nextPad - nextMl) + 'px';
-    if (btn.style.marginLeft !== ml) btn.style.marginLeft = ml;
-    if (btn.style.marginRight !== mr) btn.style.marginRight = mr;
+    if (btn.style.marginLeft !== '0px' || btn.style.marginRight !== '0px') {
+      btn.style.marginLeft = '0px';
+      btn.style.marginRight = '0px';
+    }
   }
 
   // 放到清晰度右边。播放器是懒渲染的：按钮可能先建好、清晰度后插进来，
