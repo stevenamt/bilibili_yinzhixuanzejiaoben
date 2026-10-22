@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.1.2
+// @version      1.2.0
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -371,8 +371,22 @@
     btn.title = '音质：' + name(id, true) + (stream ? ' ' + stream.kbps + ' kbps' : '');
   }
 
-  // 对齐原生按钮的左右边距；宽度不复制——「192K」比「1080P 60帧」短，
-  // 撑成一样的宽会显得两侧空
+  // 取元素内文字的实际边界（盒子宽不等于文字宽，原生按钮内部有留白）
+  function textRect(el) {
+    if (!el) return null;
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    var node, best = null;
+    while ((node = walker.nextNode())) {
+      if (!node.textContent.trim()) continue;
+      var r = document.createRange();
+      r.selectNodeContents(node);
+      var b = r.getBoundingClientRect();
+      if (!best || b.width > best.width) best = b;
+    }
+    return best;
+  }
+
+  // 兜底：拿不到相邻按钮时，直接沿用原生按钮的 margin
   function fitNative(btn) {
     var ref = document.querySelector('.bpx-player-control-bottom-right .bpx-player-ctrl-btn:not(.aq-ctrl)');
     if (!ref) return;
@@ -380,6 +394,34 @@
     if (btn.style.marginRight === cs.marginRight) return;
     btn.style.marginLeft = cs.marginLeft;
     btn.style.marginRight = cs.marginRight;
+  }
+
+  // 让「192K」左右两侧的文字间距相等，而不是盒子间距相等：
+  // 原生按钮内部留白不同（倍速左侧有下拉三角，占 11px），只对齐 margin 会让一侧挤、一侧空。
+  // 做法是先算出「这两个原生按钮如果相邻时的视觉间距」，再反推自己该留多少 margin。
+  function fitSpacing(btn) {
+    var prev = btn.previousElementSibling;
+    var next = btn.nextElementSibling;
+    var pt = textRect(prev), nt = textRect(next), bt = textRect(btn);
+    if (!pt || !nt || !bt) { fitNative(btn); return; }
+
+    var pb = prev.getBoundingClientRect();
+    var nb = next.getBoundingClientRect();
+    var bb = btn.getBoundingClientRect();
+
+    var padLeft = bt.left - bb.left;        // 文字左边到盒子左边
+    var padRight = bb.right - bt.right;     // 文字右边到盒子右边
+    var prevPad = pb.right - pt.right;      // 前一个按钮右侧留白
+    var nextPad = nt.left - nb.left;        // 后一个按钮左侧留白
+
+    // 原生若相邻时的视觉间距 = 前一个的右留白 + 原生 margin + 后一个的左留白
+    var nativeGap = parseFloat(getComputedStyle(prev).marginRight) || 10;
+    var gap = prevPad + nativeGap + nextPad;
+
+    var ml = Math.max(0, gap - padLeft - prevPad) + 'px';
+    var mr = Math.max(0, gap - padRight - nextPad) + 'px';
+    if (btn.style.marginLeft !== ml) btn.style.marginLeft = ml;
+    if (btn.style.marginRight !== mr) btn.style.marginRight = mr;
   }
 
   // 放到清晰度右边。播放器是懒渲染的：按钮可能先建好、清晰度后插进来，
@@ -397,7 +439,7 @@
     if (!bar) return;
 
     var btn = bar.querySelector('.aq-ctrl');
-    if (btn) { place(btn, bar); fitNative(btn); paint(btn); return; }
+    if (btn) { place(btn, bar); fitSpacing(btn); paint(btn); return; }
 
     btn = document.createElement('div');
     btn.className = 'bpx-player-ctrl-btn bpx-player-ctrl-aq aq-ctrl';
@@ -411,9 +453,6 @@
       }
     });
 
-    // 不覆盖宽高和边距，直接沿用原生按钮的盒模型
-    fitNative(btn);
-
     var result = document.createElement('div');
     result.className = 'bpx-player-ctrl-quality-result';
     var label = document.createElement('span');
@@ -423,6 +462,7 @@
 
     bar.appendChild(btn);
     place(btn, bar);
+    fitSpacing(btn);
 
     paint(btn);
   }
