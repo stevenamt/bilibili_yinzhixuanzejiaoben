@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.3.0
+// @version      1.3.1
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -511,22 +511,34 @@
     setTimeout(function () { closeMenu(); ensure(); }, 300);
   });
 
-  // 控制栏是动态插入的：盯住 DOM，一变就补一次，空闲时不消耗（比定时轮询更及时）
-  var queued = false;
-  new MutationObserver(function () {
-    if (queued) return;
-    queued = true;
-    setTimeout(function () { queued = false; ensure(); }, 120);
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  // 控制栏是动态插入的：盯住 DOM，一变就补一次，空闲时不消耗（比定时轮询更及时）。
+  // document-start 时 documentElement 可能还是 null，observe 会抛错并把后面的注册一起带崩
+  // （表现是 hook 生效、按钮永不出现），所以幂等 + DOMContentLoaded 兜底
+  var watching = false;
+  function watch() {
+    if (watching || !document.documentElement) return;
+    watching = true;
+    var queued = false;
+    new MutationObserver(function () {
+      if (queued) return;
+      queued = true;
+      setTimeout(function () { queued = false; ensure(); }, 120);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  watch();
 
   // 切清晰度 / 换 P 之后会重新取流，栏里要跟着变
   document.addEventListener('loadedmetadata', function () { setTimeout(ensure, 500); }, true);
 
   restorePlayback();
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', ensure);
-  } else {
+  document.addEventListener('DOMContentLoaded', function () {
+    watch();
+    ensure();
+  });
+
+  if (document.readyState !== 'loading') {
+    watch();
     ensure();
   }
 })();
