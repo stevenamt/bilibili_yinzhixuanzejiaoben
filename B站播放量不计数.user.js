@@ -8,6 +8,9 @@
 // @license      MIT
 // @homepageURL  https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
 // @supportURL   https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben/issues
+// @icon         https://raw.githubusercontent.com/stevenamt/bilibili_yinzhixuanzejiaoben/main/icon.png
+// @updateURL    https://raw.githubusercontent.com/stevenamt/bilibili_yinzhixuanzejiaoben/main/B%E7%AB%99%E6%92%AD%E6%94%BE%E9%87%8F%E4%B8%8D%E8%AE%A1%E6%95%B0.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenamt/bilibili_yinzhixuanzejiaoben/main/B%E7%AB%99%E6%92%AD%E6%94%BE%E9%87%8F%E4%B8%8D%E8%AE%A1%E6%95%B0.user.js
 // @match        https://www.bilibili.com/*
 // @run-at       document-start
 // @grant        none
