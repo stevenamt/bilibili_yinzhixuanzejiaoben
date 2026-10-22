@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.0.2
+// @version      1.1.0
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -246,6 +246,8 @@
     '.aq-item[data-off]{opacity:.4;cursor:not-allowed}' +
     '.aq-item[data-off]:hover{background:transparent}' +
     '.aq-tip{padding:4px 14px;opacity:.6}' +
+    '.aq-item:focus-visible{outline:none;background:rgba(255,255,255,.12)}' +
+    '.aq-ctrl:focus-visible{outline:2px solid #00aeec;outline-offset:-2px}' +
     '.aq-ctrl .bpx-player-ctrl-quality-result-name{white-space:nowrap}';
 
   function ensureStyle() {
@@ -280,6 +282,8 @@
     var m = document.createElement('div');
     m.className = 'aq-menu';
     m.id = 'aq-menu';
+    m.setAttribute('role', 'menu');
+    m.setAttribute('aria-label', '音质');
     if (fixed) m.style.position = 'fixed';
 
     var cur = selected();
@@ -301,7 +305,13 @@
       var item = document.createElement('div');
       item.className = 'aq-item' + (row.on ? ' aq-on' : '');
       item.setAttribute('data-id', String(row.id));
-      if (row.off) item.setAttribute('data-off', '');
+      item.setAttribute('role', 'menuitemradio');
+      item.setAttribute('aria-checked', row.on ? 'true' : 'false');
+      item.tabIndex = -1;
+      if (row.off) {
+        item.setAttribute('data-off', '');
+        item.setAttribute('aria-disabled', 'true');
+      }
       item.textContent = (row.on ? '✓ ' : '') + row.label + (row.note ? '  ' + row.note : '');
       m.appendChild(item);
     });
@@ -325,6 +335,29 @@
 
     m.style.left = left + 'px';
     m.style.top = top + 'px';
+
+    // 键盘：方向键换项、Enter/空格选中、Tab 关闭；打开时焦点落在当前档位
+    m.addEventListener('keydown', function (e) {
+      var items = [].slice.call(m.querySelectorAll('.aq-item:not([data-off])'));
+      var i = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (i < 0) i = e.key === 'ArrowDown' ? -1 : 0;
+        var next = items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length];
+        if (next) next.focus({ preventScroll: true });
+      } else if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        if (items.length) items[e.key === 'Home' ? 0 : items.length - 1].focus({ preventScroll: true });
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activate(document.activeElement);
+      } else if (e.key === 'Tab') {
+        closeMenu();
+      }
+    });
+
+    var first = m.querySelector('.aq-item.aq-on') || m.querySelector('.aq-item');
+    if (first) first.focus({ preventScroll: true });
   }
 
   // 显示真正在跑的那一路：选「自动」时播放器挑的可能不是最高档，也要如实显示
@@ -360,6 +393,13 @@
     btn.className = 'bpx-player-ctrl-btn bpx-player-ctrl-aq aq-ctrl';
     btn.setAttribute('role', 'button');
     btn.setAttribute('aria-label', '音质');
+    btn.tabIndex = 0;
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openMenu(btn);
+      }
+    });
 
     // 不覆盖宽高和边距，直接沿用原生按钮的盒模型
     fitNative(btn);
@@ -414,6 +454,19 @@
 
   // ------------------------------------------------------------------ 交互
 
+  // ------------------------------------------ 选中档位 / 键盘可操作
+
+  // 存下档位、记进度、重载。取流已经发生，只能整页重来
+  function activate(item) {
+    if (!item || item.hasAttribute('data-off')) return false;
+    var id = parseInt(item.getAttribute('data-id'), 10);
+    if (isNaN(id)) return false;
+    save(id);
+    savePlayback();
+    location.reload();
+    return true;
+  }
+
   // 播放器对控制栏有全局点击监听，点我们的按钮会顺带弹出原生菜单，所以要在捕获阶段拦下
   document.addEventListener('click', function (e) {
     var target = e.target;
@@ -422,12 +475,7 @@
     var item = target.closest('.aq-item');
     if (item) {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-      if (item.hasAttribute('data-off')) return;
-      var id = parseInt(item.getAttribute('data-id'), 10);
-      if (isNaN(id)) return;
-      save(id);
-      savePlayback();
-      location.reload(); // 取流已经发生，改档位只能重载
+      activate(item);
       return;
     }
 
@@ -449,8 +497,13 @@
     setTimeout(function () { closeMenu(); ensure(); }, 300);
   });
 
-  // 播放器 DOM 是动态渲染的，轮询补齐按钮并刷新档位显示
-  setInterval(ensure, 2000);
+  // 控制栏是动态插入的：盯住 DOM，一变就补一次，空闲时不消耗（比定时轮询更及时）
+  var queued = false;
+  new MutationObserver(function () {
+    if (queued) return;
+    queued = true;
+    setTimeout(function () { queued = false; ensure(); }, 120);
+  }).observe(document.documentElement, { childList: true, subtree: true });
 
   // 切清晰度 / 换 P 之后会重新取流，栏里要跟着变
   document.addEventListener('loadedmetadata', function () { setTimeout(ensure, 500); }, true);
