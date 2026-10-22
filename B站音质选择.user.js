@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.0.0
+// @version      1.0.1
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -41,7 +41,6 @@
   var LEVEL_KEY = 'aq_level'; // 0 = 自动（不拦取流）；-1 = 最高可用；其余为目标音轨 id
   var SEEK_KEY = 'aq_seek';
   var SEEK_TTL = 120000;      // 换档记录 2 分钟内有效
-  var BTN_MARGIN = 18;
 
   // [音轨 id, 栏里简称, 菜单全称]。顺序即高低，id 大小和音质无关（30251 无损的 id 比 30280 小）
   var TIERS = [
@@ -246,7 +245,8 @@
     '.aq-item.aq-on{color:#00aeec}' +
     '.aq-item[data-off]{opacity:.4;cursor:not-allowed}' +
     '.aq-item[data-off]:hover{background:transparent}' +
-    '.aq-tip{padding:4px 14px;opacity:.6}';
+    '.aq-tip{padding:4px 14px;opacity:.6}' +
+    '.aq-ctrl .bpx-player-ctrl-quality-result-name{white-space:nowrap}';
 
   function ensureStyle() {
     if (document.getElementById('aq-style')) return;
@@ -336,6 +336,18 @@
     btn.title = '音质：' + name(id, true) + (stream ? ' ' + stream.kbps + ' kbps' : '');
   }
 
+  // 让按钮和原生按钮同宽同边距：清晰度、倍速怎么排，它就怎么排。
+  // 原生按钮还没渲染时先跳过，后面的轮询会补上（B 站播放器是懒渲染的）
+  function fitNative(btn) {
+    var ref = document.querySelector('.bpx-player-control-bottom-right .bpx-player-ctrl-btn:not(.aq-ctrl)');
+    if (!ref) return;
+    var cs = getComputedStyle(ref);
+    if (btn.style.width === cs.width && btn.style.marginRight === cs.marginRight) return;
+    btn.style.width = cs.width;
+    btn.style.marginLeft = cs.marginLeft;
+    btn.style.marginRight = cs.marginRight;
+  }
+
   function ensure() {
     if (!/^\/(video|bangumi\/play|list|festival)/.test(location.pathname)) return;
 
@@ -343,16 +355,15 @@
     if (!bar) return;
 
     var btn = bar.querySelector('.aq-ctrl');
-    if (btn) { paint(btn); return; }
+    if (btn) { fitNative(btn); paint(btn); return; }
 
     btn = document.createElement('div');
     btn.className = 'bpx-player-ctrl-btn bpx-player-ctrl-aq aq-ctrl';
     btn.setAttribute('role', 'button');
     btn.setAttribute('aria-label', '音质');
 
-    // 原生按钮写死 width:36px 且没有右边距，会把「192K」和「1080P」粘在一起
-    btn.style.width = 'auto';
-    btn.style.marginRight = BTN_MARGIN + 'px';
+    // 不覆盖宽高和边距，直接沿用原生按钮的盒模型
+    fitNative(btn);
 
     var result = document.createElement('div');
     result.className = 'bpx-player-ctrl-quality-result';
