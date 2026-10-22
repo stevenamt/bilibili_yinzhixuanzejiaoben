@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.1.0
+// @version      1.1.1
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -380,6 +380,14 @@
     btn.style.marginRight = cs.marginRight;
   }
 
+  // 放到清晰度右边。播放器是懒渲染的：按钮可能先建好、清晰度后插进来，
+  // 所以每次 ensure 都校正一次位置，而不是只在创建时插一次
+  function place(btn, bar) {
+    var quality = bar.querySelector('.bpx-player-ctrl-quality');
+    if (!quality || quality.parentElement !== bar) return;
+    if (quality.nextElementSibling !== btn) quality.insertAdjacentElement('afterend', btn);
+  }
+
   function ensure() {
     if (!/^\/(video|bangumi\/play|list|festival)/.test(location.pathname)) return;
 
@@ -387,7 +395,7 @@
     if (!bar) return;
 
     var btn = bar.querySelector('.aq-ctrl');
-    if (btn) { fitNative(btn); paint(btn); return; }
+    if (btn) { place(btn, bar); fitNative(btn); paint(btn); return; }
 
     btn = document.createElement('div');
     btn.className = 'bpx-player-ctrl-btn bpx-player-ctrl-aq aq-ctrl';
@@ -411,10 +419,8 @@
     result.appendChild(label);
     btn.appendChild(result);
 
-    // 放在清晰度右边：两个都是「质量」类选项，挨着更好找，也不会顶在控制栏最左边缘
-    var quality = bar.querySelector('.bpx-player-ctrl-quality');
-    if (quality && quality.parentElement === bar) quality.insertAdjacentElement('afterend', btn);
-    else bar.appendChild(btn);
+    bar.appendChild(btn);
+    place(btn, bar);
 
     paint(btn);
   }
