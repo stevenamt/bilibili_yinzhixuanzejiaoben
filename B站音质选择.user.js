@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bili-audio-quality
-// @version      4.3.0
+// @version      1.0.0
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -28,7 +28,6 @@
  * 已知限制
  * --------
  * - 档位名（64K/132K/192K）是目标码率，实际码率取决于投稿源，源差时明显偏低。
- * - 杜比全景声（ec-3）在 Linux 下的 Chromium 播不了，菜单里会置灰。
  * - 无损 / 杜比取决于片源和账号权限，平台不下发就没有。
  */
 
