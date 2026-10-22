@@ -2,8 +2,8 @@
 // @name         B站播放量不计数
 // @name:zh-CN   B站播放量不计数
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      0.1.0
-// @description  在 B 站网页播放页里拦下播放量计数请求，不给视频涨播放量。观看历史、播放时长、完播等一律照常上报，也不向推荐系统发送任何负反馈。默认对每个视频生效，想正常支持某个视频可以点按钮放行一次。
+// @version      0.2.0
+// @description  播放量跟着点赞走：没点赞的视频不计播放量，点赞后才计入。观看历史、播放时长、完播一律照常上报，也不向推荐系统发送任何负反馈。
 // @author       stevenamt
 // @license      MIT
 // @homepageURL  https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
@@ -25,6 +25,11 @@
  *   - 推荐系统的兴趣画像来自历史与互动，同样不受影响
  *   - 不发任何「不感兴趣 / 拉黑 / 点踩」类请求，不去动推荐算法
  *
+ * 放行条件只有一个：你给这个视频点了赞。
+ *   - 进页面先查 x/web-interface/archive/has/like，赞过就直接放行
+ *   - 页面内点赞成功（archive/like 返回 code 0 且 like=1）立刻放行，并把拦下的计数请求补发一次
+ *   - 取消赞不收回已经补发的请求（播放量撤不回），但换到别的视频会重新从「未计」开始
+ *
  * 代价与边界
  * ----------
  * - 播放量有统计延迟，拦下后大约 10 分钟内看不出差别，别当场比对数字
@@ -41,14 +46,26 @@
 
   // 只匹配播放量计数接口。注意别写成 click-interface/web/heartbeat，那是历史/时长，要放行
   var COUNT_RE = /\/x\/click-interface\/click\/web\//;
+  var LIKE_RE = /\/x\/web-interface\/archive\/like\b/;
+  var HASLIKE_RE = /\/x\/web-interface\/archive\/has\/like/;
 
   var S = window.__biliNoCount = {
-    pass: false,   // 本页是否已放行（点按钮后置 true）
+    pass: false,   // 本页是否已放行（点赞 / 手动点按钮后置 true）
+    bv: '',        // 当前视频的 bvid，换视频时重置
     held: []       // 被拦下的请求，放行时原样补发
   };
 
   function isCount(url) {
     return typeof url === 'string' && COUNT_RE.test(url);
+  }
+
+  function isLike(url) {
+    return typeof url === 'string' && LIKE_RE.test(url) && !HASLIKE_RE.test(url);
+  }
+
+  // 点赞请求体里 like=1 是点赞、2 是取消。只认点赞
+  function isLikeOn(body) {
+    return /(^|&)like=1(&|$)/.test(String(body || ''));
   }
 
   // ---------------------------------------------------------- 请求拦截
@@ -81,11 +98,26 @@
   };
 
   XMLHttpRequest.prototype.send = function (body) {
-    if (!S.pass && isCount(this.__ncUrl)) {
-      S.held.push({ url: this.__ncUrl, method: this.__ncMethod || 'POST', body: body });
+    var url = this.__ncUrl;
+
+    if (!S.pass && isCount(url)) {
+      S.held.push({ url: url, method: this.__ncMethod || 'POST', body: body });
       fakeDone(this);
       return;
     }
+
+    // 点赞成功就放行并补发被拦下的计数请求
+    if (!S.pass && isLike(url) && isLikeOn(body)) {
+      var xhr = this;
+      xhr.addEventListener('readystatechange', function () {
+        if (xhr.readyState !== 4) return;
+        try {
+          var j = JSON.parse(xhr.responseText);
+          if (j && j.code === 0) release();
+        } catch (e) {}
+      });
+    }
+
     return rawSend.apply(this, arguments);
   };
 
@@ -106,7 +138,18 @@
           headers: { 'Content-Type': 'application/json' }
         }));
       }
-      return rawFetch.apply(this, arguments);
+
+      var pending = rawFetch.apply(this, arguments);
+
+      if (!S.pass && isLike(url) && isLikeOn(init && init.body)) {
+        return pending.then(function (res) {
+          res.clone().json().then(function (j) {
+            if (j && j.code === 0 && !S.pass) release();
+          }).catch(function () {});
+          return res;
+        });
+      }
+      return pending;
     };
   }
 
@@ -143,6 +186,37 @@
         });
       } catch (e) {}
     });
+    refreshBtn();
+  }
+
+  // -------------------------------------------------- 点赞状态与视频切换
+
+  function refreshBtn() {
+    var btn = document.querySelector('.nc-ctrl');
+    if (btn) paint(btn);
+  }
+
+  // 已经赞过的视频直接放行；新视频一律从「不计」开始
+  function queryLiked(bv) {
+    try {
+      rawFetch.call(window, 'https://api.bilibili.com/x/web-interface/archive/has/like?bvid=' + bv, {
+        credentials: 'include'
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && j.code === 0 && j.data === 1 && S.bv === bv && !S.pass) release();
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  // B 站换视频是前端路由，路径变了要重新判断
+  function syncBv() {
+    var m = /\/video\/(BV[0-9A-Za-z]+)/.exec(location.pathname);
+    var bv = m ? m[1] : '';
+    if (bv === S.bv) return;
+    S.bv = bv;
+    S.pass = false;
+    S.held.length = 0; // 上一个视频没补发的请求作废
+    refreshBtn();
+    if (bv) queryLiked(bv);
   }
 
   // ------------------------------------------------------------ 控制栏按钮
@@ -162,12 +236,12 @@
 
   function paint(btn) {
     var label = btn.querySelector('.bpx-player-ctrl-quality-result-name');
-    var text = S.pass ? '已计' : '不计';
+    var text = S.pass ? '已计' : '未计';
     if (label && label.textContent !== text) label.textContent = text;
     if (S.pass) btn.setAttribute('data-counted', ''); else btn.removeAttribute('data-counted');
     btn.title = S.pass
-      ? '这个视频会正常计入播放量（本次页面有效）'
-      : '这个视频不计播放量；点一下改为正常计数';
+      ? '已点赞：这个视频正常计入播放量'
+      : '未点赞：这个视频不计播放量；点赞或点这里改为正常计数';
     btn.setAttribute('aria-label', btn.title);
   }
 
@@ -180,6 +254,7 @@
 
   function ensure() {
     if (!/^\/(video|bangumi\/play|list|festival)/.test(location.pathname)) return;
+    syncBv();
     ensureStyle();
 
     var bar = document.querySelector('.bpx-player-control-bottom-right');
