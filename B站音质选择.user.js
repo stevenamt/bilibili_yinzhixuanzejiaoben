@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.0.1
+// @version      1.0.2
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -336,14 +336,13 @@
     btn.title = '音质：' + name(id, true) + (stream ? ' ' + stream.kbps + ' kbps' : '');
   }
 
-  // 让按钮和原生按钮同宽同边距：清晰度、倍速怎么排，它就怎么排。
-  // 原生按钮还没渲染时先跳过，后面的轮询会补上（B 站播放器是懒渲染的）
+  // 对齐原生按钮的左右边距；宽度不复制——「192K」比「1080P 60帧」短，
+  // 撑成一样的宽会显得两侧空
   function fitNative(btn) {
     var ref = document.querySelector('.bpx-player-control-bottom-right .bpx-player-ctrl-btn:not(.aq-ctrl)');
     if (!ref) return;
     var cs = getComputedStyle(ref);
-    if (btn.style.width === cs.width && btn.style.marginRight === cs.marginRight) return;
-    btn.style.width = cs.width;
+    if (btn.style.marginRight === cs.marginRight) return;
     btn.style.marginLeft = cs.marginLeft;
     btn.style.marginRight = cs.marginRight;
   }
@@ -372,8 +371,9 @@
     result.appendChild(label);
     btn.appendChild(result);
 
+    // 放在清晰度右边：两个都是「质量」类选项，挨着更好找，也不会顶在控制栏最左边缘
     var quality = bar.querySelector('.bpx-player-ctrl-quality');
-    if (quality && quality.parentElement === bar) bar.insertBefore(btn, quality);
+    if (quality && quality.parentElement === bar) quality.insertAdjacentElement('afterend', btn);
     else bar.appendChild(btn);
 
     paint(btn);
