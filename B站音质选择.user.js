@@ -1,14 +1,16 @@
 // ==UserScript==
-// @name B站网页版音质选择
-// @name:zh-CN B站网页版音质选择
+// @name         B站网页版音质选择
+// @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bili-audio-quality
-// @version      4.2.1
+// @version      4.3.0
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
 // @homepageURL  https://github.com/stevenamt/bili-audio-quality
 // @supportURL   https://github.com/stevenamt/bili-audio-quality/issues
 // @icon         https://raw.githubusercontent.com/stevenamt/bili-audio-quality/main/icon.png
+// @updateURL    https://raw.githubusercontent.com/stevenamt/bili-audio-quality/main/B%E7%AB%99%E9%9F%B3%E8%B4%A8%E9%80%89%E6%8B%A9.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenamt/bili-audio-quality/main/B%E7%AB%99%E9%9F%B3%E8%B4%A8%E9%80%89%E6%8B%A9.user.js
 // @match        https://www.bilibili.com/*
 // @run-at       document-start
 // @grant        none
@@ -17,67 +19,69 @@
 /*
  * 原理
  * -----
- * B 站网页播放器没有独立的音质选项：`x/player/playurl` 返回的 dash.audio 里同时有多路音频，
- * 选哪一路完全由播放器自己决定，服务端也没有“指定音质”的参数。
- * 所以这里只做一件事：在播放器读到取流响应之前，把 dash.audio 过滤成只剩目标档位的那一路，
- * 播放器没得挑，就只能用它。
+ * B 站网页播放器没有独立的音质选项：x/player/playurl 的响应里 dash.audio 同时带多路音频，
+ * 选哪一路由播放器自己决定，服务端也没有“指定音质”的参数。
+ * 所以这里只做一件事：在播放器读到响应之前把 dash.audio 过滤成只剩目标那一路，播放器没得挑。
  *
- * 三条路径都要拦：
- * 1. 首屏内联的 window.__playinfo__ （用 getter/setter 拦截赋值）
- * 2. 后续的 fetch 请求 （包一层，改响应体）
- * 3. 后续的 XMLHttpRequest 请求 （改 responseText / response）
+ * 三条路径都要拦：首屏内联的 window.__playinfo__、fetch、XMLHttpRequest。
  *
  * 已知限制
  * --------
- * - 档位名（64K/132K/192K）是目标码率，实际码率取决于投稿源，源差的时候会明显偏低。
- * - 杜比全景声（ec-3）在 Linux 下的 Chromium 播不了，会被置灰。
- * - Hi-Res 无损、杜比需要大会员，没有时对应档位不会出现在菜单里。
+ * - 档位名（64K/132K/192K）是目标码率，实际码率取决于投稿源，源差时明显偏低。
+ * - 杜比全景声（ec-3）在 Linux 下的 Chromium 播不了，菜单里会置灰。
+ * - 无损 / 杜比取决于片源和账号权限，平台不下发就没有。
  */
 
 (function () {
   'use strict';
 
-  if (window.__biliAQ) return; // 防止重复注入
+  if (window.__biliAQ) return; // 已经注入过
 
-  // ------------------------------------------------------------------ 常量
+  // ------------------------------------------------------------------ 配置
 
-  var STORE_KEY = 'aq_level'; // 0 = 自动（不拦取流）；-1 = 最高可用；其余为目标音轨 id
-  var BTN_MARGIN = 18; // 控制栏按钮右边距，和原生按钮的间距观感对齐
+  var LEVEL_KEY = 'aq_level'; // 0 = 自动（不拦取流）；-1 = 最高可用；其余为目标音轨 id
+  var SEEK_KEY = 'aq_seek';
+  var SEEK_TTL = 120000;      // 换档记录 2 分钟内有效
+  var BTN_MARGIN = 18;
 
-  // 档位顺序同时也是“高低”顺序：id 大小跟音质高低无关（30251 无损的 id 比 30280 还小）
+  // [音轨 id, 栏里简称, 菜单全称]。顺序即高低，id 大小和音质无关（30251 无损的 id 比 30280 小）
   var TIERS = [
-    { id: 30216, short: '64K', full: '64K' },
-    { id: 30232, short: '132K', full: '132K' },
-    { id: 30280, short: '192K', full: '192K' },
-    { id: 30250, short: '杜比', full: '杜比全景声' },
-    { id: 30251, short: '无损', full: 'Hi-Res 无损' }
+    [30216, '64K', '64K'],
+    [30232, '132K', '132K'],
+    [30280, '192K', '192K'],
+    [30250, '杜比', '杜比全景声'],
+    [30251, '无损', 'Hi-Res 无损']
   ];
-  var ORDER = TIERS.map(function (t) { return t.id; });
-  var FIRST_VIP = ORDER.indexOf(30250); // 从这里开始是大会员档位
+  var ORDER = TIERS.map(function (t) { return t[0]; });
+  var VIP_FROM = ORDER.indexOf(30250); // 从这里开始是大会员档
 
-  function tier(id) {
-    for (var i = 0; i < TIERS.length; i++) if (TIERS[i].id === id) return TIERS[i];
-    return null;
+  var NAMES = {};
+  TIERS.forEach(function (t) { NAMES[t[0]] = t; });
+
+  function name(id, full) {
+    var t = NAMES[id];
+    if (t) return full ? t[2] : t[1];
+    return id ? '#' + id : '自动';
   }
-  function shortName(id) { var t = tier(id); return t ? t.short : (id ? '#' + id : '自动'); }
-  function fullName(id) { var t = tier(id); return t ? t.full : (id ? '#' + id : '自动'); }
-  function kbpsOf(stream) { return Math.round(((stream && stream.bandwidth) || 0) / 1000); }
+
+  function kbps(stream) {
+    return Math.round(((stream && stream.bandwidth) || 0) / 1000);
+  }
 
   // ------------------------------------------------------------------ 存储
 
   function selected() {
     try {
-      var v = localStorage.getItem(STORE_KEY);
-      var n = v === null ? 0 : parseInt(v, 10);
+      var n = parseInt(localStorage.getItem(LEVEL_KEY), 10);
       return isNaN(n) ? 0 : n;
     } catch (e) { return 0; }
   }
 
   function save(id) {
-    try { localStorage.setItem(STORE_KEY, String(id)); } catch (e) {}
+    try { localStorage.setItem(LEVEL_KEY, String(id)); } catch (e) {}
   }
 
-  // ------------------------------------------------------- 取流响应处理
+  // ------------------------------------------------------------ 取流处理
 
   function codecOk(codec) {
     try {
@@ -86,54 +90,38 @@
     } catch (e) { return true; }
   }
 
-  // 把 dash 里的普通 / 无损 / 杜比三处音频合成一张表
+  // 把普通 / 无损 / 杜比三处音频合成一张表，按档位高低排序
   function collect(dash) {
     var list = [];
 
-    (dash.audio || []).forEach(function (a) {
-      list.push({ id: a.id, kbps: kbpsOf(a), codec: a.codecs || '', raw: a });
-    });
-
-    // 无损是单个对象，不是数组
-    var flac = dash.flac && dash.flac.audio;
-    if (flac && flac.baseUrl) {
-      list.push({ id: flac.id || 30251, kbps: kbpsOf(flac), codec: flac.codecs || 'flac', raw: flac });
+    function add(a, defId, defCodec) {
+      if (!a) return;
+      list.push({ id: a.id || defId, kbps: kbps(a), codec: a.codecs || defCodec, raw: a });
     }
 
-    // 杜比是数组
-    var dolby = dash.dolby && dash.dolby.audio;
-    if (Array.isArray(dolby)) {
-      dolby.forEach(function (a) {
-        list.push({ id: a.id || 30250, kbps: kbpsOf(a), codec: a.codecs || 'ec-3', raw: a });
-      });
+    (dash.audio || []).forEach(function (a) { add(a, a.id, ''); });
+
+    var flac = dash.flac && dash.flac.audio; // 无损是单个对象
+    if (flac && flac.baseUrl) add(flac, 30251, 'flac');
+
+    var dolby = dash.dolby && dash.dolby.audio; // 杜比是数组
+    if (Array.isArray(dolby)) dolby.forEach(function (a) { add(a, 30250, 'ec-3'); });
+
+    return list.sort(function (x, y) { return ORDER.indexOf(x.id) - ORDER.indexOf(y.id); });
+  }
+
+  // 挑一路：命中就用；否则退到不高于它的普通档；target = -1 取能播的最高档
+  function choose(list, target) {
+    var playable = list.filter(function (x) { return codecOk(x.codec); });
+    if (!playable.length) return list[list.length - 1];
+    if (target === -1) return playable[playable.length - 1];
+
+    var want = ORDER.indexOf(target);
+    for (var i = playable.length - 1; i >= 0; i--) {
+      var idx = ORDER.indexOf(playable[i].id);
+      if (idx > -1 && idx <= want && idx < VIP_FROM) return playable[i];
     }
-
-    list.sort(function (x, y) { return ORDER.indexOf(x.id) - ORDER.indexOf(y.id); });
-    return list;
-  }
-
-  // 目标档位不可用时，退到“不高于它的最近一档”；普通档之间的回退不跨到会员档
-  function pick(list, id) {
-    var hit = list.filter(function (x) { return x.id === id; })[0];
-    if (hit) return hit;
-
-    var target = ORDER.indexOf(id);
-    var lower = list.filter(function (x) {
-      var i = ORDER.indexOf(x.id);
-      return i > -1 && (target === -1 || i <= target) && i < FIRST_VIP && codecOk(x.codec);
-    });
-    if (lower.length) return lower[lower.length - 1];
-
-    // 目标档及其以下都没有可用音轨（例如片源只有杜比）：先退到第一个本浏览器能播的，
-    // 都播不了才退回列表首项，避免落到 ec-3 这种播不出来的编码上
-    var playable = list.filter(function (x) { return codecOk(x.codec); });
-    return playable.length ? playable[0] : list[0];
-  }
-
-  function pickTop(list) {
-    var playable = list.filter(function (x) { return codecOk(x.codec); });
-    var pool = playable.length ? playable : list;
-    return pool[pool.length - 1];
+    return playable[0];
   }
 
   function handle(json) {
@@ -142,56 +130,56 @@
       if (!dash) return json;
 
       var list = collect(dash);
-      if (list.length) {
-        window.__biliAQ = {
-          all: list.map(function (x) {
-            return { id: x.id, kbps: x.kbps, codec: x.codec, ok: codecOk(x.codec) };
-          })
-        };
-      }
+      if (!list.length) return json;
 
       var target = selected();
-      if (!target || !list.length) {
-        window.__biliAQ = window.__biliAQ || {};
-        window.__biliAQ.applied = 0;
-        return json;
+      var applied = 0;
+
+      if (target) {
+        var hit = choose(list, target);
+        if (hit) {
+          dash.audio = [hit.raw]; // 只留一路，播放器没得挑
+          dash.dolby = { type: 0, audio: null };
+          dash.flac = { display: false, audio: null };
+          applied = hit.id;
+        }
       }
 
-      var hit = target === -1 ? pickTop(list) : pick(list, target);
-      if (!hit) return json;
-
-      // 只留一路，播放器没得挑
-      dash.audio = [hit.raw];
-      dash.dolby = { type: 0, audio: null };
-      dash.flac = { display: false, audio: null };
-
-      window.__biliAQ.applied = hit.id;
+      window.__biliAQ = {
+        all: list.map(function (x) {
+          return { id: x.id, kbps: x.kbps, codec: x.codec, ok: codecOk(x.codec) };
+        }),
+        applied: applied
+      };
     } catch (e) {}
     return json;
   }
 
+  function isPlayurl(url) {
+    return typeof url === 'string' && url.indexOf('playurl') > -1;
+  }
+
   // 1) 首屏内联数据
-  var inlineStore;
+  var inline;
   try {
     Object.defineProperty(window, '__playinfo__', {
       configurable: true,
-      get: function () { return inlineStore; },
-      set: function (v) { inlineStore = handle(v); }
+      get: function () { return inline; },
+      set: function (v) { inline = handle(v); }
     });
   } catch (e) {}
-
-  function isPlayurl(url) { return typeof url === 'string' && url.indexOf('playurl') > -1; }
 
   // 2) fetch
   var rawFetch = window.fetch;
   if (typeof rawFetch === 'function') {
     window.fetch = function (input) {
       var url = typeof input === 'string' ? input : (input && input.url);
-      return rawFetch.apply(this, arguments).then(function (res) {
-        if (!isPlayurl(url)) return res;
+      var pending = rawFetch.apply(this, arguments);
+      if (!isPlayurl(url)) return pending;
+
+      return pending.then(function (res) {
         return res.clone().json().then(function (json) {
-          handle(json);
-          return new Response(JSON.stringify(json), {
+          return new Response(JSON.stringify(handle(json)), {
             status: res.status,
             statusText: res.statusText,
             headers: res.headers
@@ -201,7 +189,7 @@
     };
   }
 
-  // 3) XMLHttpRequest
+  // 3) XMLHttpRequest：在 send 之前注册 readystatechange，早于播放器读取
   var rawOpen = XMLHttpRequest.prototype.open;
   var rawSend = XMLHttpRequest.prototype.send;
 
@@ -213,8 +201,6 @@
   XMLHttpRequest.prototype.send = function () {
     var xhr = this;
     if (isPlayurl(xhr.__aqUrl)) {
-      // 必须在 send 之前注册：播放器一般在 send 之后才挂自己的 onload，
-      // 原先挂在 load 上时，播放器若已先注册就会先读到未过滤的原始响应
       var patched = false;
       xhr.addEventListener('readystatechange', function () {
         if (patched || xhr.readyState !== 4) return;
@@ -231,7 +217,15 @@
 
   // ------------------------------------------------------------ 控制栏按钮
 
-  // 实际在跑的那一路音频：分段 URL 形如 xxx-1-30280.m4s，取最近的一条
+  function streams() {
+    return (window.__biliAQ && window.__biliAQ.all) || [];
+  }
+
+  function applied() {
+    return (window.__biliAQ && window.__biliAQ.applied) || 0;
+  }
+
+  // 实际在跑的那一路：分片 URL 形如 xxx-1-30280.m4s，取最近出现的一条
   function runningId() {
     try {
       var entries = performance.getEntriesByType('resource');
@@ -243,56 +237,23 @@
     return 0;
   }
 
-  function streams() {
-    return (window.__biliAQ && window.__biliAQ.all) || [];
-  }
-
-  function appliedId() {
-    return (window.__biliAQ && window.__biliAQ.applied) || 0;
-  }
-
-  function menuRows() {
-    var list = streams();
-    var cur = selected();
-    var rows = [
-      { id: 0, label: '自动', on: cur === 0 },
-      { id: -1, label: '最高可用', on: cur === -1 }
-    ];
-    list.forEach(function (a) {
-      rows.push({
-        id: a.id,
-        label: fullName(a.id),
-        note: a.kbps + ' kbps' + (a.ok ? '' : ' · 当前浏览器不支持'),
-        on: cur === a.id,
-        disabled: !a.ok
-      });
-    });
-    return rows;
-  }
-
-  function playerRoot() {
-    var c = document.querySelector('.bpx-player-container');
-    if (c && getComputedStyle(c).position !== 'static') return c;
-    return document.body;
-  }
+  var CSS =
+    '.aq-menu{position:absolute;z-index:2147483000;padding:4px 0;background:#1b1b1b;' +
+    'border:1px solid rgba(255,255,255,.08);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.55);' +
+    'min-width:210px;color:#eee;white-space:nowrap;cursor:default;text-align:left;' +
+    'font:13px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}' +
+    '.aq-item{padding:4px 14px;cursor:pointer}' +
+    '.aq-item:hover{background:rgba(255,255,255,.12)}' +
+    '.aq-item.aq-on{color:#00aeec}' +
+    '.aq-item[data-off]{opacity:.4;cursor:not-allowed}' +
+    '.aq-item[data-off]:hover{background:transparent}' +
+    '.aq-tip{padding:4px 14px;opacity:.6}';
 
   function ensureStyle() {
     if (document.getElementById('aq-style')) return;
     var style = document.createElement('style');
     style.id = 'aq-style';
-    style.textContent = [
-      '.aq-menu{position:absolute;z-index:2147483000;margin:0;padding:4px 0;',
-      'background:#1b1b1b;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.55);',
-      'border:1px solid rgba(255,255,255,.08);min-width:210px;color:#eee;text-align:left;',
-      'white-space:nowrap;cursor:default;',
-      'font:13px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}',
-      '.aq-item{padding:4px 14px;cursor:pointer}',
-      '.aq-item:hover{background:rgba(255,255,255,.12)}',
-      '.aq-item.aq-on{color:#00aeec}',
-      '.aq-item[data-off]{opacity:.4;cursor:not-allowed}',
-      '.aq-item[data-off]:hover{background:transparent}',
-      '.aq-tip{padding:4px 14px;opacity:.6}'
-    ].join('');
+    style.textContent = CSS;
     (document.head || document.documentElement).appendChild(style);
   }
 
@@ -302,7 +263,12 @@
 
   function closeMenu() {
     var m = menu();
-    if (m && m.parentNode) m.parentNode.removeChild(m);
+    if (m) m.remove();
+  }
+
+  function playerRoot() {
+    var c = document.querySelector('.bpx-player-container');
+    return c && getComputedStyle(c).position !== 'static' ? c : document.body;
   }
 
   function openMenu(btn) {
@@ -310,18 +276,33 @@
     ensureStyle();
 
     var root = playerRoot();
-    var useFixed = root === document.body;
+    var fixed = root === document.body;
 
     var m = document.createElement('div');
     m.className = 'aq-menu';
     m.id = 'aq-menu';
-    m.style.position = useFixed ? 'fixed' : 'absolute';
+    if (fixed) m.style.position = 'fixed';
 
-    menuRows().forEach(function (row) {
+    var cur = selected();
+    var rows = [
+      { id: 0, label: '自动', on: cur === 0 },
+      { id: -1, label: '最高可用', on: cur === -1 }
+    ];
+    streams().forEach(function (a) {
+      rows.push({
+        id: a.id,
+        label: name(a.id, true),
+        note: a.kbps + ' kbps' + (a.ok ? '' : ' · 当前浏览器不支持'),
+        on: cur === a.id,
+        off: !a.ok
+      });
+    });
+
+    rows.forEach(function (row) {
       var item = document.createElement('div');
       item.className = 'aq-item' + (row.on ? ' aq-on' : '');
       item.setAttribute('data-id', String(row.id));
-      if (row.disabled) item.setAttribute('data-off', '');
+      if (row.off) item.setAttribute('data-off', '');
       item.textContent = (row.on ? '✓ ' : '') + row.label + (row.note ? '  ' + row.note : '');
       m.appendChild(item);
     });
@@ -333,29 +314,27 @@
       m.appendChild(tip);
     }
 
-    (useFixed ? document.body : root).appendChild(m);
+    (fixed ? document.body : root).appendChild(m);
 
-    // 贴着按钮弹出：右下角对齐，超出视口就往里收
+    // 贴着按钮弹出：右下角对齐，上方放不下就翻到下面
     var b = btn.getBoundingClientRect();
+    var box = fixed ? { left: 0, top: 0 } : root.getBoundingClientRect();
     var size = m.getBoundingClientRect();
-    var rootBox = useFixed ? { left: 0, top: 0 } : root.getBoundingClientRect();
-
-    var left = Math.max(8, b.right - size.width - rootBox.left);
-    var top = b.top - size.height - 8 - rootBox.top;
-    if (top < 8 - rootBox.top) top = b.bottom + 8 - rootBox.top;
+    var left = Math.max(8, b.right - size.width - box.left);
+    var top = b.top - size.height - 8 - box.top;
+    if (top < 8 - box.top) top = b.bottom + 8 - box.top;
 
     m.style.left = left + 'px';
     m.style.top = top + 'px';
   }
 
+  // 显示真正在跑的那一路：选「自动」时播放器挑的可能不是最高档，也要如实显示
   function paint(btn) {
-    var list = streams();
-    // 显示“实际在跑”的那一档：选自动时播放器自己挑的可能不是最高档，也要如实显示
-    var id = runningId() || appliedId() || selected();
-    var stream = list.filter(function (x) { return x.id === id; })[0];
+    var id = runningId() || applied() || selected();
+    var stream = streams().filter(function (x) { return x.id === id; })[0];
     var label = btn.querySelector('.bpx-player-ctrl-quality-result-name');
-    if (label) label.textContent = shortName(id);
-    btn.title = '音质：' + fullName(id) + (stream ? ' ' + stream.kbps + ' kbps' : '');
+    if (label) label.textContent = name(id);
+    btn.title = '音质：' + name(id, true) + (stream ? ' ' + stream.kbps + ' kbps' : '');
   }
 
   function ensure() {
@@ -372,8 +351,7 @@
     btn.setAttribute('role', 'button');
     btn.setAttribute('aria-label', '音质');
 
-    // 原生 .bpx-player-ctrl-btn 写死 width:36px 又没有右边距，会把「192K」和「1080P」粘在一起；
-    // 这里宽度自适应，右边距手动给，间距才和原生按钮一致
+    // 原生按钮写死 width:36px 且没有右边距，会把「192K」和「1080P」粘在一起
     btn.style.width = 'auto';
     btn.style.marginRight = BTN_MARGIN + 'px';
 
@@ -391,46 +369,33 @@
     paint(btn);
   }
 
-  // ------------------------------------------------------ 换档保留播放进度
+  // -------------------------------------------------------- 换档保留进度
 
-  // 换档必须重载页面，视频会回到起点。这里把当前时间点临时存进 sessionStorage，
-  // 重载后取出来 seek 回去，尽量接着原来的位置播（尽力而为，B 站自己也会记忆进度）
-  var SEEK_KEY = 'aq_seek';
-  var SEEK_TTL = 120000; // 超过 2 分钟的旧记录不再用，避免重开页面时跳到莫名其妙的位置
-
-  function clearSeek() {
-    try {
-      sessionStorage.removeItem(SEEK_KEY);
-      sessionStorage.removeItem(SEEK_KEY + '_at');
-    } catch (e) {}
-  }
-
+  // 换档只能重载页面，视频会回到起点。把时间点临时存进 sessionStorage，重载后 seek 回去。
   function savePlayback() {
     try {
       var v = document.querySelector('video');
-      if (!v || !isFinite(v.currentTime) || v.currentTime < 1) return;
-      sessionStorage.setItem(SEEK_KEY, String(v.currentTime));
-      sessionStorage.setItem(SEEK_KEY + '_at', String(Date.now()));
+      if (!v || !(v.currentTime > 0.5)) return;
+      sessionStorage.setItem(SEEK_KEY, v.currentTime + ',' + Date.now());
     } catch (e) {}
   }
 
   function restorePlayback() {
     var t = 0;
     try {
-      var at = parseInt(sessionStorage.getItem(SEEK_KEY + '_at') || '0', 10);
-      t = parseFloat(sessionStorage.getItem(SEEK_KEY) || '0');
-      if (!at || Date.now() - at > SEEK_TTL) t = 0;
+      var parts = (sessionStorage.getItem(SEEK_KEY) || '').split(',');
+      var at = +parts[1];
+      if (at && Date.now() - at <= SEEK_TTL) t = +parts[0] || 0;
     } catch (e) { return; }
-    if (!t || !isFinite(t)) { clearSeek(); return; }
+    if (!(t > 0)) return;
 
-    // document-start 时页面里还没有 video，轮询等播放器就绪后再 seek；
-    // 成功跳到目标位置后才清记录，没等到播放器就下次再试
+    // document-start 时还没有 video，等播放器就绪后再 seek
     var tries = 0;
     var timer = setInterval(function () {
       var v = document.querySelector('video');
       if (v && v.readyState >= 1) {
         clearInterval(timer);
-        try { v.currentTime = t; clearSeek(); } catch (e) {}
+        try { v.currentTime = t; sessionStorage.removeItem(SEEK_KEY); } catch (e) {}
       } else if (++tries > 40) {
         clearInterval(timer);
       }
@@ -439,8 +404,7 @@
 
   // ------------------------------------------------------------------ 交互
 
-  // 播放器对控制栏的点击有全局监听，点我们的按钮会顺带弹出原生清晰度菜单，
-  // 所以要在捕获阶段拦下来，选中逻辑也放在这里
+  // 播放器对控制栏有全局点击监听，点我们的按钮会顺带弹出原生菜单，所以要在捕获阶段拦下
   document.addEventListener('click', function (e) {
     var target = e.target;
     if (!target || !target.closest) return;
@@ -475,10 +439,10 @@
     setTimeout(function () { closeMenu(); ensure(); }, 300);
   });
 
-  // 播放器 DOM 是动态渲染的，轮询补齐按钮；顺便刷新栏里的档位
+  // 播放器 DOM 是动态渲染的，轮询补齐按钮并刷新档位显示
   setInterval(ensure, 2000);
 
-  // 切清晰度 / 换 P 之后音频会重新取流，栏里要跟着变
+  // 切清晰度 / 换 P 之后会重新取流，栏里要跟着变
   document.addEventListener('loadedmetadata', function () { setTimeout(ensure, 500); }, true);
 
   restorePlayback();
