@@ -20,7 +20,7 @@ B 站网页版没有独立的音质选项。这个脚本在播放器读到取流
 
 点下面的链接，脚本管理器会弹出安装页：
 
-[B站音质选择.user.js](https://raw.githubusercontent.com/stevenamt/bili-audio-quality/main/B%E7%AB%99%E9%9F%B3%E8%B4%A8%E9%80%89%E6%8B%A9.user.js)
+[B站音质选择.user.js](https://raw.githubusercontent.com/stevenamt/bilibili_yinzhixuanzejiaoben/main/B%E7%AB%99%E9%9F%B3%E8%B4%A8%E9%80%89%E6%8B%A9.user.js)
 
 **手动安装**
 

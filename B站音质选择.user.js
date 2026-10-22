@@ -1,16 +1,16 @@
 // ==UserScript==
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
-// @namespace    https://github.com/stevenamt/bili-audio-quality
+// @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
 // @version      1.0.0
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
-// @homepageURL  https://github.com/stevenamt/bili-audio-quality
-// @supportURL   https://github.com/stevenamt/bili-audio-quality/issues
-// @icon         https://raw.githubusercontent.com/stevenamt/bili-audio-quality/main/icon.png
-// @updateURL    https://raw.githubusercontent.com/stevenamt/bili-audio-quality/main/B%E7%AB%99%E9%9F%B3%E8%B4%A8%E9%80%89%E6%8B%A9.user.js
-// @downloadURL  https://raw.githubusercontent.com/stevenamt/bili-audio-quality/main/B%E7%AB%99%E9%9F%B3%E8%B4%A8%E9%80%89%E6%8B%A9.user.js
+// @homepageURL  https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
+// @supportURL   https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben/issues
+// @icon         https://raw.githubusercontent.com/stevenamt/bilibili_yinzhixuanzejiaoben/main/icon.png
+// @updateURL    https://raw.githubusercontent.com/stevenamt/bilibili_yinzhixuanzejiaoben/main/B%E7%AB%99%E9%9F%B3%E8%B4%A8%E9%80%89%E6%8B%A9.user.js
+// @downloadURL  https://raw.githubusercontent.com/stevenamt/bilibili_yinzhixuanzejiaoben/main/B%E7%AB%99%E9%9F%B3%E8%B4%A8%E9%80%89%E6%8B%A9.user.js
 // @match        https://www.bilibili.com/*
 // @run-at       document-start
 // @grant        none
