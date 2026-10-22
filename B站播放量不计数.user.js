@@ -2,8 +2,8 @@
 // @name         B站播放量不计数
 // @name:zh-CN   B站播放量不计数
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      0.2.0
-// @description  播放量跟着点赞走：没点赞的视频不计播放量，点赞后才计入。观看历史、播放时长、完播一律照常上报，也不向推荐系统发送任何负反馈。
+// @version      0.3.0
+// @description  播放量跟着点赞走：没点赞的视频不计播放量，点赞后才计入，并在播放器上提示本次是否计入。观看历史、播放时长、完播一律照常上报，也不向推荐系统发送任何负反馈。
 // @author       stevenamt
 // @license      MIT
 // @homepageURL  https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
@@ -190,6 +190,7 @@
       } catch (e) {}
     });
     refreshBtn();
+    toast('已计入播放量', true);
   }
 
   // -------------------------------------------------- 点赞状态与视频切换
@@ -205,7 +206,15 @@
       rawFetch.call(window, 'https://api.bilibili.com/x/web-interface/archive/has/like?bvid=' + bv, {
         credentials: 'include'
       }).then(function (r) { return r.json(); }).then(function (j) {
-        if (j && j.code === 0 && j.data === 1 && S.bv === bv && !S.pass) release();
+        if (!j || j.code !== 0 || S.bv !== bv) return;
+        if (j.data === 1) {
+          if (!S.pass) release();
+        } else {
+          // 等播放器渲染出来再提示，别在空白页上弹
+          setTimeout(function () {
+            if (!S.pass && S.bv === bv) toast('本次不计播放量', false);
+          }, 1500);
+        }
       }).catch(function () {});
     } catch (e) {}
   }
@@ -227,7 +236,14 @@
   var CSS =
     '.nc-ctrl .bpx-player-ctrl-quality-result-name{white-space:nowrap}' +
     '.nc-ctrl[data-counted] .bpx-player-ctrl-quality-result-name{color:#00aeec}' +
-    '.nc-ctrl:focus-visible{outline:2px solid #00aeec;outline-offset:-2px}';
+    '.nc-ctrl:focus-visible{outline:2px solid #00aeec;outline-offset:-2px}' +
+    '.nc-toast{position:absolute;left:50%;top:10%;transform:translateX(-50%);z-index:2147483000;' +
+    'padding:6px 14px;border-radius:4px;background:rgba(0,0,0,.72);color:#fff;white-space:nowrap;' +
+    'font:13px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;' +
+    'opacity:0;transition:opacity .18s ease;pointer-events:none}' +
+    '.nc-toast.nc-show{opacity:1}' +
+    '.nc-toast[data-on] .nc-dot{background:#00aeec}' +
+    '.nc-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#8a8a8a;margin-right:7px;vertical-align:1px}';
 
   function ensureStyle() {
     if (document.getElementById('nc-style')) return;
@@ -235,6 +251,34 @@
     style.id = 'nc-style';
     style.textContent = CSS;
     (document.head || document.documentElement).appendChild(style);
+  }
+
+  // 状态变化时在播放器上闪一条提示，比控制栏那两个字显眼
+  function toast(text, on) {
+    try {
+      var el = document.getElementById('nc-toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'nc-toast';
+        el.className = 'nc-toast';
+        el.setAttribute('role', 'status');
+        el.setAttribute('aria-live', 'polite');
+        var root = document.querySelector('.bpx-player-container');
+        var fixed = !root || getComputedStyle(root).position === 'static';
+        if (fixed) { el.style.position = 'fixed'; root = document.body; }
+        if (root) root.appendChild(el);
+      }
+      el.setAttribute('data-on', on ? '' : '');
+      if (!on) el.removeAttribute('data-on');
+      el.innerHTML = '';
+      var dot = document.createElement('i');
+      dot.className = 'nc-dot';
+      el.appendChild(dot);
+      el.appendChild(document.createTextNode(text));
+      el.classList.add('nc-show');
+      clearTimeout(el.__ncTimer);
+      el.__ncTimer = setTimeout(function () { el.classList.remove('nc-show'); }, 2400);
+    } catch (e) {}
   }
 
   function paint(btn) {
