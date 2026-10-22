@@ -2,7 +2,7 @@
 // @name         B站网页版音质选择
 // @name:zh-CN   B站网页版音质选择
 // @namespace    https://github.com/stevenamt/bilibili_yinzhixuanzejiaoben
-// @version      1.1.1
+// @version      1.1.2
 // @description  在 B 站网页播放器的控制栏里选择音频档位（自动 / 最高可用 / 64K / 132K / 192K / 杜比全景声 / Hi-Res 无损），并显示当前实际在用的那一档。
 // @author       stevenamt
 // @license      MIT
@@ -236,10 +236,12 @@
   }
 
   var CSS =
-    '.aq-menu{position:absolute;z-index:2147483000;padding:4px 0;background:#1b1b1b;' +
+    '.aq-menu{position:absolute;z-index:2147483000;padding:4px 0;background:rgba(28,28,28,.94);' +
+    'backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);animation:aq-in .12s ease-out;' +
     'border:1px solid rgba(255,255,255,.08);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.55);' +
     'min-width:210px;color:#eee;white-space:nowrap;cursor:default;text-align:left;' +
     'font:13px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}' +
+    '@keyframes aq-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}' +
     '.aq-item{padding:4px 14px;cursor:pointer}' +
     '.aq-item:hover{background:rgba(255,255,255,.12)}' +
     '.aq-item.aq-on{color:#00aeec}' +
